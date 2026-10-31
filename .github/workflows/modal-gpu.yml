@@ -1,0 +1,97 @@
+name: Reusable Modal GPU Job
+
+on:
+  workflow_call:
+    inputs:
+      command:
+        description: "Shell command to run inside the remote GPU container"
+        required: true
+        type: string
+      gpu:
+        description: "Modal GPU type"
+        required: false
+        default: "T4"
+        type: string
+      timeout_minutes:
+        description: "Maximum remote job runtime in minutes"
+        required: false
+        default: 120
+        type: number
+    secrets:
+      MODAL_TOKEN_ID:
+        required: true
+      MODAL_TOKEN_SECRET:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  run-on-modal:
+    name: Run workload on Modal GPU
+    runs-on: ubuntu-latest
+    timeout-minutes: 135
+    steps:
+      - name: Check requested resources
+        shell: bash
+        env:
+          GPU_TYPE: ${{ inputs.gpu }}
+          JOB_TIMEOUT: ${{ inputs.timeout_minutes }}
+          JOB_COMMAND: ${{ inputs.command }}
+        run: |
+          set -euo pipefail
+          case "$GPU_TYPE" in
+            T4|L4|A10|A10G|A100|H100) ;;
+            *) echo "Unsupported GPU type: $GPU_TYPE"; exit 2 ;;
+          esac
+          if ! [[ "$JOB_TIMEOUT" =~ ^[0-9]+$ ]] || (( JOB_TIMEOUT < 1 || JOB_TIMEOUT > 720 )); then
+            echo "timeout_minutes must be between 1 and 720"
+            exit 2
+          fi
+          if [[ -z "$JOB_COMMAND" ]]; then
+            echo "command must not be empty"
+            exit 2
+          fi
+
+      - name: Checkout calling repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+          path: workspace
+          persist-credentials: false
+
+      - name: Checkout GPU-Manager
+        uses: actions/checkout@v4
+        with:
+          repository: samanramezani1377-hub/GPU-Manager
+          ref: main
+          path: .gpu-manager
+          persist-credentials: false
+
+      - name: Prepare worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .gpu-manager/worker.py workspace/.gpu_manager_worker.py
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Modal
+        run: python -m pip install --disable-pip-version-check "modal>=1.0,<2"
+
+      - name: Run remotely on Modal
+        working-directory: workspace
+        shell: bash
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+          GPU_MANAGER_GPU: ${{ inputs.gpu }}
+          GPU_MANAGER_TIMEOUT: ${{ inputs.timeout_minutes }}
+          GPU_MANAGER_COMMAND: ${{ inputs.command }}
+        run: |
+          set -euo pipefail
+          modal run .gpu_manager_worker.py --command "$GPU_MANAGER_COMMAND"
