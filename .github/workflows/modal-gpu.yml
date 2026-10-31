@@ -163,10 +163,10 @@ jobs:
           set -e
 
           mkdir -p "$RUNNER_TEMP/gpu-manager-download"
-          if modal volume get gpu-manager-transfer "$GPU_MANAGER_TRANSFER_KEY" "$RUNNER_TEMP/gpu-manager-download"; then
+          if modal volume get "gpu-manager-$GPU_MANAGER_TRANSFER_KEY" / "$RUNNER_TEMP/gpu-manager-download"; then
             mkdir -p .gpu-manager-transfer
             cp -a "$RUNNER_TEMP/gpu-manager-download/." .gpu-manager-transfer/
-            modal volume rm -r gpu-manager-transfer "$GPU_MANAGER_TRANSFER_KEY" || true
+            modal volume delete -y "gpu-manager-$GPU_MANAGER_TRANSFER_KEY" || true
           else
             echo "No committed transfer directory could be retrieved from Modal."
             if (( modal_status == 0 )); then
