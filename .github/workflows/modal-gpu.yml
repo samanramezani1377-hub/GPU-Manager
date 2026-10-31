@@ -99,7 +99,6 @@ jobs:
           path: workspace
           persist-credentials: false
       - name: Set up Python
-        if: ${{ inputs.gpu_command != '' }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ inputs.python_version }}
@@ -204,6 +203,10 @@ jobs:
           ref: ${{ github.sha }}
           path: workspace
           persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python_version }}
       - name: Run parallel CPU workload
         working-directory: workspace
         shell: bash
@@ -245,6 +248,10 @@ jobs:
         with:
           name: gpu-manager-parallel-transfer
           path: workspace/.gpu-manager-parallel/
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python_version }}
       - name: Run final CPU workload
         working-directory: workspace
         shell: bash
