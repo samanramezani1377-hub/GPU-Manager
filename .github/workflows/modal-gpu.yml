@@ -30,7 +30,7 @@ jobs:
   run-on-modal:
     name: Run workload on Modal GPU
     runs-on: ubuntu-latest
-    timeout-minutes: 135
+    timeout-minutes: 360
     steps:
       - name: Check requested resources
         shell: bash
@@ -41,10 +41,10 @@ jobs:
         run: |
           set -euo pipefail
           case "$GPU_TYPE" in
-            T4|L4|A10|A10G|A100|H100) ;;
+            T4|L4|A10|L40S|A100|H100) ;;
             *) echo "Unsupported GPU type: $GPU_TYPE"; exit 2 ;;
           esac
-          if ! [[ "$JOB_TIMEOUT" =~ ^[0-9]+$ ]] || (( JOB_TIMEOUT < 1 || JOB_TIMEOUT > 720 )); then
+          if ! [[ "$JOB_TIMEOUT" =~ ^[0-9]+$ ]] || (( JOB_TIMEOUT < 1 || JOB_TIMEOUT > 345 )); then
             echo "timeout_minutes must be between 1 and 720"
             exit 2
           fi
