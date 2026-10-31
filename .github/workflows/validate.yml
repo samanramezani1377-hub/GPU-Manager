@@ -1,0 +1,38 @@
+name: Validate GPU-Manager
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile worker
+        run: python -m py_compile worker.py
+      - name: Install YAML parser
+        run: python -m pip install --disable-pip-version-check PyYAML
+      - name: Parse all workflow and example YAML files
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+
+          files = sorted(Path(".github/workflows").glob("*.yml"))
+          files += sorted(Path("examples").glob("*.yml"))
+          for path in files:
+              with path.open(encoding="utf-8") as stream:
+                  yaml.load(stream, Loader=yaml.BaseLoader)
+              print(f"YAML syntax OK: {path}")
+          PY
