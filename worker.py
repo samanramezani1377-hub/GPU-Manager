@@ -8,14 +8,14 @@ from pathlib import Path
 
 import modal
 
-ALLOWED_GPUS = {"T4", "L4", "A10", "A10G", "A100", "H100"}
+ALLOWED_GPUS = {"T4", "L4", "A10", "L40S", "A100", "H100"}
 GPU = os.environ.get("GPU_MANAGER_GPU", "T4")
 TIMEOUT_SECONDS = int(os.environ.get("GPU_MANAGER_TIMEOUT", "120")) * 60
 
 if GPU not in ALLOWED_GPUS:
     raise ValueError(f"Unsupported GPU type: {GPU}")
-if not 60 <= TIMEOUT_SECONDS <= 720 * 60:
-    raise ValueError("GPU_MANAGER_TIMEOUT must be between 1 and 720 minutes")
+if not 60 <= TIMEOUT_SECONDS <= 345 * 60:
+    raise ValueError("GPU_MANAGER_TIMEOUT must be between 1 and 345 minutes")
 
 app = modal.App("gpu-manager-one-shot")
 
