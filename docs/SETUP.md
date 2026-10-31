@@ -41,7 +41,7 @@ The transfer folder is .gpu-manager-transfer/.
 - CPU preparation writes files needed by GPU into this folder.
 - GPU code reads and writes files in this folder.
 - The worker mounts the folder through a unique per-run path in the Modal Volume gpu-manager-transfer. It commits changes periodically while the GPU job runs and once more before normal exit.
-- The GitHub runner downloads the archive, restores the folder, then runs the CPU-after-GPU stage.
+- The GitHub runner downloads the run-specific directory from the Volume, restores it to the project workspace, then runs the CPU-after-GPU stage.
 - Main and parallel transfer folders are retained as GitHub artifacts for 7 days.
 
 The independent parallel CPU branch uses .gpu-manager-parallel/. Keep its files separate from the main transfer folder. The final CPU stage receives both directories. These are hidden folders, so the reusable workflow explicitly includes hidden files when uploading artifacts. Never place credentials, tokens, or private keys in either transfer folder.
