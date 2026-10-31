@@ -189,6 +189,7 @@ jobs:
           name: gpu-manager-main-transfer
           path: workspace/.gpu-manager-transfer/
           if-no-files-found: ignore
+          include-hidden-files: true
           retention-days: 7
 
   parallel_cpu:
@@ -216,6 +217,7 @@ jobs:
           name: gpu-manager-parallel-transfer
           path: workspace/.gpu-manager-parallel/
           if-no-files-found: ignore
+          include-hidden-files: true
           retention-days: 7
 
   cpu_finalize:
@@ -258,4 +260,5 @@ jobs:
             workspace/.gpu-manager-transfer/
             workspace/.gpu-manager-parallel/
           if-no-files-found: ignore
+          include-hidden-files: true
           retention-days: 7
