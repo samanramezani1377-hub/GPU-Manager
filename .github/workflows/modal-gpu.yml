@@ -1,89 +1,146 @@
-name: Reusable Modal GPU Job
-
+name: Reusable CPU and GPU Pipeline
 on:
   workflow_call:
     inputs:
-      command:
-        description: "Shell command to run inside the remote GPU container"
-        required: true
+      cpu_command:
+        description: CPU-only command on GitHub Actions
+        required: false
+        default: ""
+        type: string
+      cpu_before_gpu:
+        description: CPU preparation command before GPU
+        required: false
+        default: ""
+        type: string
+      gpu_command:
+        description: Command executed on Modal GPU
+        required: false
+        default: ""
+        type: string
+      gpu_setup_command:
+        description: Optional dependency setup inside Modal
+        required: false
+        default: ""
+        type: string
+      cpu_after_gpu:
+        description: CPU command after GPU
+        required: false
+        default: ""
+        type: string
+      cpu_parallel_command:
+        description: Independent CPU job running alongside the main pipeline
+        required: false
+        default: ""
+        type: string
+      cpu_finalize_command:
+        description: CPU command after main and parallel jobs
+        required: false
+        default: ""
         type: string
       gpu:
-        description: "Modal GPU type"
+        description: Modal GPU type
         required: false
-        default: "T4"
+        default: T4
         type: string
       timeout_minutes:
-        description: "Maximum remote job runtime in minutes"
+        description: GPU timeout in minutes
         required: false
         default: 120
         type: number
+      python_version:
+        description: Python version on GitHub runner
+        required: false
+        default: "3.11"
+        type: string
     secrets:
       MODAL_TOKEN_ID:
-        required: true
+        required: false
       MODAL_TOKEN_SECRET:
-        required: true
-
+        required: false
 permissions:
   contents: read
-
 jobs:
-  run-on-modal:
-    name: Run workload on Modal GPU
+  main_compute:
+    name: Main CPU / GPU pipeline
+    if: ${{ inputs.cpu_command != '' || inputs.cpu_before_gpu != '' || inputs.gpu_command != '' || inputs.cpu_after_gpu != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:
-      - name: Check requested resources
+      - name: Validate pipeline configuration
         shell: bash
         env:
-          GPU_TYPE: ${{ inputs.gpu }}
+          CPU_COMMAND: ${{ inputs.cpu_command }}
+          GPU_COMMAND: ${{ inputs.gpu_command }}
           JOB_TIMEOUT: ${{ inputs.timeout_minutes }}
-          JOB_COMMAND: ${{ inputs.command }}
+          GPU_TYPE: ${{ inputs.gpu }}
         run: |
           set -euo pipefail
-          case "$GPU_TYPE" in
-            T4|L4|A10|L40S|A100|H100) ;;
-            *) echo "Unsupported GPU type: $GPU_TYPE"; exit 2 ;;
-          esac
-          if ! [[ "$JOB_TIMEOUT" =~ ^[0-9]+$ ]] || (( JOB_TIMEOUT < 1 || JOB_TIMEOUT > 345 )); then
-            echo "timeout_minutes must be between 1 and 720"
+          if [[ -n "$GPU_COMMAND" && -n "$CPU_COMMAND" ]]; then
+            echo "Use cpu_before_gpu/cpu_after_gpu with gpu_command; cpu_command is for CPU-only runs."
             exit 2
           fi
-          if [[ -z "$JOB_COMMAND" ]]; then
-            echo "command must not be empty"
+          if [[ -z "$GPU_COMMAND" && ( -n "${{ inputs.cpu_before_gpu }}" || -n "${{ inputs.cpu_after_gpu }}" ) ]]; then
+            echo "cpu_before_gpu and cpu_after_gpu require gpu_command."
             exit 2
           fi
-
-      - name: Checkout calling repository
+          if [[ -n "$GPU_COMMAND" ]]; then
+            case "$GPU_TYPE" in T4|L4|A10|L40S|A100|H100) ;; *) echo "Unsupported GPU: $GPU_TYPE"; exit 2 ;; esac
+            if ! [[ "$JOB_TIMEOUT" =~ ^[0-9]+$ ]] || (( JOB_TIMEOUT < 1 || JOB_TIMEOUT > 345 )); then
+              echo "timeout_minutes must be between 1 and 345."; exit 2
+            fi
+          fi
+      - name: Checkout caller repository
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.sha }}
           path: workspace
           persist-credentials: false
-
-      - name: Checkout GPU-Manager
+      - name: Set up Python
+        if: ${{ inputs.gpu_command != '' }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python_version }}
+      - name: Install Modal CLI
+        if: ${{ inputs.gpu_command != '' }}
+        run: python -m pip install --disable-pip-version-check "modal>=1.0,<2"
+      - name: Run CPU-only workload
+        if: ${{ inputs.gpu_command == '' && inputs.cpu_command != '' }}
+        working-directory: workspace
+        shell: bash
+        env:
+          CPU_COMMAND: ${{ inputs.cpu_command }}
+        run: bash -euo pipefail -c "$CPU_COMMAND"
+      - name: Run CPU preparation
+        if: ${{ inputs.gpu_command != '' && inputs.cpu_before_gpu != '' }}
+        working-directory: workspace
+        shell: bash
+        env:
+          CPU_COMMAND: ${{ inputs.cpu_before_gpu }}
+        run: bash -euo pipefail -c "$CPU_COMMAND"
+      - name: Check Modal credentials
+        if: ${{ inputs.gpu_command != '' }}
+        shell: bash
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          set -euo pipefail
+          [[ -n "$MODAL_TOKEN_ID" ]] || { echo "Missing MODAL_TOKEN_ID secret."; exit 2; }
+          [[ -n "$MODAL_TOKEN_SECRET" ]] || { echo "Missing MODAL_TOKEN_SECRET secret."; exit 2; }
+      - name: Checkout central worker
+        if: ${{ inputs.gpu_command != '' }}
         uses: actions/checkout@v4
         with:
           repository: samanramezani1377-hub/GPU-Manager
           ref: main
           path: .gpu-manager
           persist-credentials: false
-
       - name: Prepare worker
-        shell: bash
-        run: |
-          set -euo pipefail
-          cp .gpu-manager/worker.py workspace/.gpu_manager_worker.py
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install Modal
-        run: python -m pip install --disable-pip-version-check "modal>=1.0,<2"
-
-      - name: Run remotely on Modal
+        if: ${{ inputs.gpu_command != '' }}
+        run: cp .gpu-manager/worker.py workspace/.gpu_manager_worker.py
+      - name: Run GPU workload and restore transfer directory
+        if: ${{ inputs.gpu_command != '' }}
         working-directory: workspace
         shell: bash
         env:
@@ -91,7 +148,101 @@ jobs:
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
           GPU_MANAGER_GPU: ${{ inputs.gpu }}
           GPU_MANAGER_TIMEOUT: ${{ inputs.timeout_minutes }}
-          GPU_MANAGER_COMMAND: ${{ inputs.command }}
+          GPU_MANAGER_COMMAND: ${{ inputs.gpu_command }}
+          GPU_MANAGER_SETUP_COMMAND: ${{ inputs.gpu_setup_command }}
+          GPU_MANAGER_TRANSFER_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
-          modal run .gpu_manager_worker.py --command "$GPU_MANAGER_COMMAND"
+          modal run .gpu_manager_worker.py \
+            --command "$GPU_MANAGER_COMMAND" \
+            --transfer-key "$GPU_MANAGER_TRANSFER_KEY" \
+            --setup-command "$GPU_MANAGER_SETUP_COMMAND"
+          mkdir -p "$RUNNER_TEMP/gpu-manager-download"
+          modal volume get gpu-manager-transfer "$GPU_MANAGER_TRANSFER_KEY/outputs.tar.gz" "$RUNNER_TEMP/gpu-manager-download/outputs.tar.gz"
+          mkdir -p .gpu-manager-transfer
+          tar -xzf "$RUNNER_TEMP/gpu-manager-download/outputs.tar.gz" -C .gpu-manager-transfer
+          modal volume rm -r gpu-manager-transfer "$GPU_MANAGER_TRANSFER_KEY" || true
+      - name: Run CPU stage after GPU
+        if: ${{ inputs.gpu_command != '' && inputs.cpu_after_gpu != '' }}
+        working-directory: workspace
+        shell: bash
+        env:
+          CPU_COMMAND: ${{ inputs.cpu_after_gpu }}
+        run: bash -euo pipefail -c "$CPU_COMMAND"
+      - name: Save main transfer files
+        if: ${{ always() && hashFiles('workspace/.gpu-manager-transfer/**') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpu-manager-main-transfer
+          path: workspace/.gpu-manager-transfer/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  parallel_cpu:
+    name: Independent parallel CPU workload
+    if: ${{ inputs.cpu_parallel_command != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+          path: workspace
+          persist-credentials: false
+      - name: Run parallel CPU workload
+        working-directory: workspace
+        shell: bash
+        env:
+          CPU_COMMAND: ${{ inputs.cpu_parallel_command }}
+        run: bash -euo pipefail -c "$CPU_COMMAND"
+      - name: Save parallel transfer files
+        if: ${{ always() && hashFiles('workspace/.gpu-manager-parallel/**') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpu-manager-parallel-transfer
+          path: workspace/.gpu-manager-parallel/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  cpu_finalize:
+    name: Final CPU stage
+    needs: [main_compute, parallel_cpu]
+    if: ${{ always() && inputs.cpu_finalize_command != '' && (needs.main_compute.result == 'success' || needs.main_compute.result == 'skipped') && (needs.parallel_cpu.result == 'success' || needs.parallel_cpu.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+          path: workspace
+          persist-credentials: false
+      - name: Download main transfer files
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: gpu-manager-main-transfer
+          path: workspace/.gpu-manager-transfer/
+      - name: Download parallel transfer files
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: gpu-manager-parallel-transfer
+          path: workspace/.gpu-manager-parallel/
+      - name: Run final CPU workload
+        working-directory: workspace
+        shell: bash
+        env:
+          CPU_COMMAND: ${{ inputs.cpu_finalize_command }}
+        run: bash -euo pipefail -c "$CPU_COMMAND"
+      - name: Save final outputs
+        if: ${{ always() && (hashFiles('workspace/.gpu-manager-transfer/**') != '' || hashFiles('workspace/.gpu-manager-parallel/**') != '') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpu-manager-final-output
+          path: |
+            workspace/.gpu-manager-transfer/
+            workspace/.gpu-manager-parallel/
+          if-no-files-found: ignore
+          retention-days: 7
