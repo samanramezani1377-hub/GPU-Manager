@@ -1,0 +1,16 @@
+name: Parallel CPU and GPU workloads
+on:
+  workflow_dispatch:
+jobs:
+  compute:
+    uses: samanramezani1377-hub/GPU-Manager/.github/workflows/modal-gpu.yml@main
+    with:
+      gpu_setup_command: "python -m pip install -r requirements.txt"
+      gpu_command: "python train.py --output-dir .gpu-manager-transfer"
+      cpu_parallel_command: "python run_independent_cpu_task.py"
+      cpu_finalize_command: "python combine_results.py"
+      gpu: "T4"
+      timeout_minutes: 120
+    secrets:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
