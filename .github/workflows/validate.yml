@@ -44,3 +44,10 @@ jobs:
                   yaml.load(stream, Loader=yaml.BaseLoader)
               print(f"YAML syntax OK: {path}")
           PY
+  cpu_pipeline_smoke:
+    name: Smoke-test reusable CPU pipeline and artifact handoff
+    uses: ./.github/workflows/modal-gpu.yml
+    with:
+      cpu_command: "mkdir -p .gpu-manager-transfer && printf main-smoke > .gpu-manager-transfer/result.txt"
+      cpu_parallel_command: "mkdir -p .gpu-manager-parallel && printf parallel-smoke > .gpu-manager-parallel/result.txt"
+      cpu_finalize_command: "test -s .gpu-manager-transfer/result.txt && test -s .gpu-manager-parallel/result.txt && echo 'CPU pipeline and artifact handoff passed'"
