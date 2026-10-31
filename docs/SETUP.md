@@ -1,50 +1,66 @@
 # Setup and operating rules
 
-## 1. Create Modal credentials
+## 1. Modal credentials (GPU stages only)
 
 1. Create or sign in to a Modal account: https://modal.com/
-2. Create a Modal token for GitHub Actions.
-3. In every caller repository (or an eligible GitHub organization secret scope), add:
+2. Create a dedicated Modal token for GitHub Actions.
+3. In each repository that will execute a GPU stage, add these Actions repository secrets:
    - MODAL_TOKEN_ID
    - MODAL_TOKEN_SECRET
-4. Never put either value in source code, workflow YAML, logs, or committed files.
+4. Never put either value in workflow YAML, source files, logs, or committed files.
 
-## 2. Enforce credit-only usage
+CPU-only workflows do not need Modal credentials.
 
-The architecture is intended to stop when included credits are exhausted. Before enabling any caller workflow:
+## 2. Credit-only billing guardrail
 
-1. Open Modal Usage & Billing for the workspace.
-2. Find Spend limit (not only the usage budget).
-3. Set the monthly Spend limit to $0 and save it.
-4. Confirm the saved value in the dashboard.
+Before enabling GPU workloads:
 
-Modal documents that the spend limit caps net out-of-pocket charges after credits. At the limit, workloads that would incur additional out-of-pocket charges are stopped; work still covered by remaining applicable credits can continue until the usage limit is reached.
+1. Open the Modal workspace Usage & Billing settings.
+2. Find the workspace Spend limit, not just the usage budget.
+3. Set the out-of-pocket Spend limit to $0 if the account UI permits it, save, and verify the saved value.
+4. Re-check after plan, payment, or workspace changes.
 
-Do not assume that the Starter plan's included credits alone prevent overage. Re-check the saved spend limit in Modal after account or billing changes. A job already running when a limit is reached may have final usage settlement behavior governed by Modal's billing system.
+Do not assume included credits alone prevent overage. A spend limit is the intended billing guardrail, but users should verify Modal's current billing behavior and the exact setting in their own workspace. Do not run production training until the guardrail is confirmed.
 
-## 3. Connect a repository
+## 3. Choose a pipeline shape
 
-Copy examples/call-modal-gpu.yml into the caller repository at:
-.github/workflows/run-gpu-job.yml
+Use one reusable workflow call in the caller repository:
 
-Then change command, gpu, and timeout_minutes for that repository. The caller workflow's trigger determines when the remote job starts. Only call this reusable workflow from jobs that genuinely need a GPU.
+- CPU only: set cpu_command; no Modal secrets required.
+- GPU only: set gpu_command; Modal secrets required.
+- Sequential: set cpu_before_gpu, gpu_command, and/or cpu_after_gpu.
+- Parallel: add cpu_parallel_command for an independent CPU job.
+- Final join: add cpu_finalize_command to run after the main and parallel jobs complete.
 
-Supported GPU labels in this initial version: T4, L4, A10, A10G, A100, H100.
+See the examples directory for complete caller workflows.
 
-## 4. What runs remotely
+## 4. File handoff
 
-- GitHub Actions checks out the calling repository at the triggering commit.
-- The central worker is copied into the checkout.
-- Modal receives the working tree, excluding common credential files and Git metadata.
-- The command runs in a temporary Modal container with the selected GPU.
-- The one-shot container exits when the command finishes or fails.
+The transfer folder is .gpu-manager-transfer/.
 
-The initial worker does not automatically upload training outputs back to GitHub. Add an explicit artifact/volume transfer step for a workload before relying on it to preserve checkpoints or generated files.
+- CPU preparation writes files needed by GPU into this folder.
+- GPU code reads and writes files in this folder.
+- The worker archives the folder to a per-run path in the Modal Volume gpu-manager-transfer and explicitly commits the Volume.
+- The GitHub runner downloads the archive, restores the folder, then runs the CPU-after-GPU stage.
+- Main and parallel transfer folders are retained as GitHub artifacts for 7 days.
+
+The independent parallel CPU branch uses .gpu-manager-parallel/. Keep its files separate from the main transfer folder. The final CPU stage receives both directories.
+
+A cancelled job can leave a run-specific directory in the Modal Volume. Remove stale run folders from the Modal dashboard or with the Modal CLI after confirming the run is no longer active.
+
+## 5. Runtime and dependencies
+
+- Supported GPU labels: T4, L4, A10, L40S, A100, H100.
+- GPU timeout: 1–345 minutes.
+- CPU work runs on GitHub-hosted ubuntu-latest; GitHub runner usage limits and quotas still apply.
+- GPU dependencies are not inferred. Use gpu_setup_command, for example: python -m pip install -r requirements.txt.
+- CPU dependencies must be installed by the CPU command or project scripts.
 
 ## Security notes
 
-- Treat the command input as trusted code: it is executed by Bash inside the remote container.
-- Do not store secrets in files that are part of the checked-out repository.
-- The worker excludes common secret-file patterns, but this is not a substitute for keeping credentials out of the source tree.
-- This first version does not pass GitHub secrets into the remote workload.
-- The Modal token should be a dedicated token with the minimum permissions available for the intended workspace.
+- Treat every command input as trusted code. Do not let untrusted pull requests control commands.
+- GitHub secrets are used only by the runner to authenticate to Modal; they are not passed into the remote workload.
+- The worker excludes common secret-file patterns and Git metadata, but this is not a substitute for keeping credentials out of the repository.
+- The workflow checks out the caller's triggering commit with checkout credentials disabled.
+- The Modal Volume path is unique per workflow run and attempt, avoiding intentional file-path collisions between concurrent runs.
+- The public reusable workflow currently references the central worker on main. Pin the caller's reusable workflow reference to an immutable commit SHA if stricter supply-chain pinning is required.
