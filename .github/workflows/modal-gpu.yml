@@ -151,7 +151,7 @@ jobs:
           GPU_MANAGER_TIMEOUT: ${{ inputs.timeout_minutes }}
           GPU_MANAGER_COMMAND: ${{ inputs.gpu_command }}
           GPU_MANAGER_SETUP_COMMAND: ${{ inputs.gpu_setup_command }}
-          GPU_MANAGER_TRANSFER_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
+          GPU_MANAGER_TRANSFER_KEY: ${{ github.repository_id }}-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
           set +e
