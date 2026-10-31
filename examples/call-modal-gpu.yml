@@ -1,0 +1,16 @@
+# Copy this file into a caller repository as .github/workflows/run-gpu-job.yml
+name: Example GPU workload
+
+on:
+  workflow_dispatch:
+
+jobs:
+  gpu:
+    uses: samanramezani1377-hub/GPU-Manager/.github/workflows/modal-gpu.yml@main
+    with:
+      command: "python train.py"
+      gpu: "T4"
+      timeout_minutes: 120
+    secrets:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
