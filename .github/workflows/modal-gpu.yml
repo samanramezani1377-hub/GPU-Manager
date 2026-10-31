@@ -153,15 +153,26 @@ jobs:
           GPU_MANAGER_TRANSFER_KEY: ${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
+          set +e
           modal run .gpu_manager_worker.py \
             --command "$GPU_MANAGER_COMMAND" \
             --transfer-key "$GPU_MANAGER_TRANSFER_KEY" \
             --setup-command "$GPU_MANAGER_SETUP_COMMAND"
+          modal_status=$?
+          set -e
+
           mkdir -p "$RUNNER_TEMP/gpu-manager-download"
-          modal volume get gpu-manager-transfer "$GPU_MANAGER_TRANSFER_KEY/outputs.tar.gz" "$RUNNER_TEMP/gpu-manager-download/outputs.tar.gz"
-          mkdir -p .gpu-manager-transfer
-          tar -xzf "$RUNNER_TEMP/gpu-manager-download/outputs.tar.gz" -C .gpu-manager-transfer
-          modal volume rm -r gpu-manager-transfer "$GPU_MANAGER_TRANSFER_KEY" || true
+          if modal volume get gpu-manager-transfer "$GPU_MANAGER_TRANSFER_KEY/outputs.tar.gz" "$RUNNER_TEMP/gpu-manager-download/outputs.tar.gz"; then
+            mkdir -p .gpu-manager-transfer
+            tar -xzf "$RUNNER_TEMP/gpu-manager-download/outputs.tar.gz" -C .gpu-manager-transfer
+            modal volume rm -r gpu-manager-transfer "$GPU_MANAGER_TRANSFER_KEY" || true
+          else
+            echo "No committed transfer archive could be retrieved from Modal."
+            if (( modal_status == 0 )); then
+              exit 1
+            fi
+          fi
+          exit "$modal_status"
       - name: Run CPU stage after GPU
         if: ${{ inputs.gpu_command != '' && inputs.cpu_after_gpu != '' }}
         working-directory: workspace
