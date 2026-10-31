@@ -1,0 +1,8 @@
+name: CPU workload
+on:
+  workflow_dispatch:
+jobs:
+  compute:
+    uses: samanramezani1377-hub/GPU-Manager/.github/workflows/modal-gpu.yml@main
+    with:
+      cpu_command: "python main.py"
