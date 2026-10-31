@@ -44,7 +44,7 @@ The transfer folder is .gpu-manager-transfer/.
 - The GitHub runner downloads the archive, restores the folder, then runs the CPU-after-GPU stage.
 - Main and parallel transfer folders are retained as GitHub artifacts for 7 days.
 
-The independent parallel CPU branch uses .gpu-manager-parallel/. Keep its files separate from the main transfer folder. The final CPU stage receives both directories.
+The independent parallel CPU branch uses .gpu-manager-parallel/. Keep its files separate from the main transfer folder. The final CPU stage receives both directories. These are hidden folders, so the reusable workflow explicitly includes hidden files when uploading artifacts. Never place credentials, tokens, or private keys in either transfer folder.
 
 A cancelled job can leave a run-specific directory in the Modal Volume. A forced timeout may prevent the final commit, but periodic commits can preserve earlier checkpoints. Remove stale run folders from the Modal dashboard or with the Modal CLI after confirming the run is no longer active.
 
