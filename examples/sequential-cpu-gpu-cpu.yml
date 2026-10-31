@@ -1,0 +1,16 @@
+name: CPU preparation, GPU training, CPU evaluation
+on:
+  workflow_dispatch:
+jobs:
+  compute:
+    uses: samanramezani1377-hub/GPU-Manager/.github/workflows/modal-gpu.yml@main
+    with:
+      cpu_before_gpu: "python prepare.py"
+      gpu_setup_command: "python -m pip install -r requirements.txt"
+      gpu_command: "python train.py --data-dir .gpu-manager-transfer"
+      cpu_after_gpu: "python evaluate.py --checkpoint-dir .gpu-manager-transfer"
+      gpu: "T4"
+      timeout_minutes: 120
+    secrets:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
