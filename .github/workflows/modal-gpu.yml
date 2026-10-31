@@ -164,12 +164,12 @@ jobs:
           set -e
 
           mkdir -p "$RUNNER_TEMP/gpu-manager-download"
-          if modal volume get gpu-manager-transfer "$GPU_MANAGER_TRANSFER_KEY/outputs.tar.gz" "$RUNNER_TEMP/gpu-manager-download/outputs.tar.gz"; then
+          if modal volume get gpu-manager-transfer "$GPU_MANAGER_TRANSFER_KEY" "$RUNNER_TEMP/gpu-manager-download"; then
             mkdir -p .gpu-manager-transfer
-            tar -xzf "$RUNNER_TEMP/gpu-manager-download/outputs.tar.gz" -C .gpu-manager-transfer
+            cp -a "$RUNNER_TEMP/gpu-manager-download/." .gpu-manager-transfer/
             modal volume rm -r gpu-manager-transfer "$GPU_MANAGER_TRANSFER_KEY" || true
           else
-            echo "No committed transfer archive could be retrieved from Modal."
+            echo "No committed transfer directory could be retrieved from Modal."
             if (( modal_status == 0 )); then
               exit 1
             fi
@@ -221,7 +221,7 @@ jobs:
   cpu_finalize:
     name: Final CPU stage
     needs: [main_compute, parallel_cpu]
-    if: ${{ always() && inputs.cpu_finalize_command != '' && (needs.main_compute.result == 'success' || needs.main_compute.result == 'skipped') && (needs.parallel_cpu.result == 'success' || needs.parallel_cpu.result == 'skipped') }}
+    if: ${{ always() && inputs.cpu_finalize_command != '' && needs.main_compute.result != 'cancelled' && needs.parallel_cpu.result != 'cancelled' }}
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:
