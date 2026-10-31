@@ -1,13 +1,14 @@
 """One-shot Modal worker used by the reusable GPU-Manager workflow.
 
-Only files inside .gpu-manager-transfer are guaranteed to be returned to GitHub Actions.
+The .gpu-manager-transfer directory is mounted through a per-run Modal Volume path.
 """
 from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
-import tarfile
+import threading
 from pathlib import Path
 
 import modal
@@ -27,7 +28,7 @@ app = modal.App("gpu-manager-one-shot")
 
 image = (
     modal.Image.debian_slim(python_version="3.11")
-    .apt_install("git", "bash", "tar")
+    .apt_install("git", "bash")
     .add_local_dir(
         ".",
         remote_path="/workspace",
@@ -56,23 +57,47 @@ def validate_transfer_key(value: str) -> str:
     return value
 
 
-def persist_transfer_files(transfer_key: str) -> None:
+def prepare_transfer_directory(transfer_key: str) -> Path:
+    """Copy input files to a unique Volume path and link the project folder to it."""
+    key = validate_transfer_key(transfer_key)
     source_dir = Path("/workspace/.gpu-manager-transfer")
-    source_dir.mkdir(parents=True, exist_ok=True)
+    volume_dir = Path("/transfer") / key
+    volume_dir.mkdir(parents=True, exist_ok=True)
 
-    destination_dir = Path("/transfer") / transfer_key
-    destination_dir.mkdir(parents=True, exist_ok=True)
-    archive_path = destination_dir / "outputs.tar.gz"
-    if archive_path.exists():
-        archive_path.unlink()
-
-    with tarfile.open(archive_path, mode="w:gz") as archive:
+    if source_dir.is_symlink():
+        raise RuntimeError("The incoming transfer directory must not be a symlink")
+    if source_dir.exists():
+        if not source_dir.is_dir():
+            raise RuntimeError(".gpu-manager-transfer exists but is not a directory")
         for child in source_dir.iterdir():
-            archive.add(child, arcname=child.name, recursive=True)
+            destination = volume_dir / child.name
+            if child.is_dir() and not child.is_symlink():
+                shutil.copytree(child, destination, dirs_exist_ok=True)
+            else:
+                shutil.copy2(child, destination, follow_symlinks=False)
+        shutil.rmtree(source_dir)
 
-    # Volume writes must be committed to become visible to the GitHub runner.
+    source_dir.parent.mkdir(parents=True, exist_ok=True)
+    source_dir.symlink_to(volume_dir, target_is_directory=True)
     TRANSFER_VOLUME.commit()
-    print(f"Committed transfer files for run {transfer_key}")
+    return source_dir
+
+
+def start_periodic_volume_commits() -> tuple[threading.Event, threading.Thread]:
+    """Commit changed checkpoints periodically while a long GPU process is running."""
+    stop_event = threading.Event()
+
+    def commit_loop() -> None:
+        while not stop_event.wait(120):
+            try:
+                TRANSFER_VOLUME.commit()
+                print("Periodic Modal Volume checkpoint commit completed.")
+            except Exception as exc:  # Keep the workload alive; final commit retries.
+                print(f"Warning: periodic Volume commit failed: {exc}")
+
+    thread = threading.Thread(target=commit_loop, name="modal-volume-commit", daemon=True)
+    thread.start()
+    return stop_event, thread
 
 
 @app.function(
@@ -84,16 +109,19 @@ def persist_transfer_files(transfer_key: str) -> None:
     volumes={"/transfer": TRANSFER_VOLUME},
 )
 def execute(command: str, setup_command: str, transfer_key: str) -> int:
-    """Execute trusted project code and persist checkpoints/outputs on success or failure."""
+    """Execute trusted project code with live checkpoint persistence to Modal Volume."""
     key = validate_transfer_key(transfer_key)
     workdir = Path("/workspace")
     if not workdir.is_dir():
         raise RuntimeError("Caller workspace was not copied into the Modal image")
 
+    transfer_path = prepare_transfer_directory(key)
     print(f"GPU: {GPU}")
     print(f"Working directory: {workdir}")
+    print(f"Persistent transfer directory: {transfer_path}")
     print("Starting remote workload...")
 
+    stop_event, commit_thread = start_periodic_volume_commits()
     return_code = 0
     try:
         if setup_command.strip():
@@ -114,8 +142,10 @@ def execute(command: str, setup_command: str, transfer_key: str) -> int:
         )
         return_code = result.returncode
     finally:
-        # Preserve partial checkpoints even if setup/training fails.
-        persist_transfer_files(key)
+        stop_event.set()
+        commit_thread.join()
+        # Ensure the last checkpoint/output changes are visible to the runner.
+        TRANSFER_VOLUME.commit()
 
     if return_code != 0:
         raise RuntimeError(f"GPU workload exited with status {return_code}")
