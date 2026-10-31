@@ -70,6 +70,8 @@ jobs:
         shell: bash
         env:
           CPU_COMMAND: ${{ inputs.cpu_command }}
+          CPU_BEFORE_GPU: ${{ inputs.cpu_before_gpu }}
+          CPU_AFTER_GPU: ${{ inputs.cpu_after_gpu }}
           GPU_COMMAND: ${{ inputs.gpu_command }}
           JOB_TIMEOUT: ${{ inputs.timeout_minutes }}
           GPU_TYPE: ${{ inputs.gpu }}
@@ -79,7 +81,7 @@ jobs:
             echo "Use cpu_before_gpu/cpu_after_gpu with gpu_command; cpu_command is for CPU-only runs."
             exit 2
           fi
-          if [[ -z "$GPU_COMMAND" && ( -n "${{ inputs.cpu_before_gpu }}" || -n "${{ inputs.cpu_after_gpu }}" ) ]]; then
+          if [[ -z "$GPU_COMMAND" && ( -n "$CPU_BEFORE_GPU" || -n "$CPU_AFTER_GPU" ) ]]; then
             echo "cpu_before_gpu and cpu_after_gpu require gpu_command."
             exit 2
           fi
