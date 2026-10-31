@@ -69,7 +69,7 @@ Only files inside .gpu-manager-transfer/ are guaranteed to be returned from Moda
 - CPU preparation writes datasets/configuration needed by GPU into this directory.
 - The Modal worker receives the checked-out repository, including this directory.
 - The GPU command reads inputs from it and writes checkpoints/results back into it.
-- The worker commits this directory to a run-specific path in the Modal Volume.
+- The worker mounts this directory from a run-specific Modal Volume path and commits it periodically while the GPU job runs, then commits again before normal exit.
 - GitHub Actions downloads and restores it before cpu_after_gpu.
 - Main and parallel transfer folders are uploaded as GitHub workflow artifacts for 7 days.
 
@@ -88,5 +88,5 @@ For large checkpoints, the Modal Volume is the transport between Modal and the G
 - GitHub secrets are used only by the runner to authenticate to Modal; they are not forwarded into the remote workload.
 - Common credential files are excluded from the Modal image, but credentials should never be committed to the repository.
 - The central worker is fetched from the public main branch. For stricter supply-chain control, callers can pin the reusable workflow to an immutable commit SHA after reviewing a release.
-- The worker uses a dedicated Modal Volume named gpu-manager-transfer. Each run has a unique run/attempt directory and removes it after download. A cancelled workflow may leave a temporary directory behind.
+- The worker uses a dedicated Modal Volume named gpu-manager-transfer. Each run has a unique run/attempt directory and removes it after download. Periodic commits can preserve earlier checkpoints if a long-running job is interrupted, although a forced termination can still prevent the final commit. A cancelled workflow may leave a temporary directory behind.
 - No live Modal execution test is claimed until Modal credentials are configured and a small test is run.
