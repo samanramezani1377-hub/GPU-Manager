@@ -19,6 +19,14 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Install actionlint
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - name: Install actionlint binary
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+      - name: Lint GitHub Actions workflows
+        run: actionlint -color -oneline .github/workflows/*.yml examples/*.yml
       - name: Compile worker
         run: python -m py_compile worker.py
       - name: Install YAML parser
