@@ -1,6 +1,6 @@
 """One-shot Modal worker used by the reusable GPU-Manager workflow.
 
-The .gpu-manager-transfer directory is mounted through a per-run Modal Volume path.
+The .gpu-manager-transfer directory is mounted through a dedicated per-run Modal Volume.
 """
 from __future__ import annotations
 
@@ -17,13 +17,17 @@ ALLOWED_GPUS = {"T4", "L4", "A10", "L40S", "A100", "H100"}
 GPU = os.environ.get("GPU_MANAGER_GPU", "T4")
 TIMEOUT_MINUTES = int(os.environ.get("GPU_MANAGER_TIMEOUT", "120"))
 TIMEOUT_SECONDS = TIMEOUT_MINUTES * 60
+TRANSFER_KEY = os.environ.get("GPU_MANAGER_TRANSFER_KEY", "")
 
 if GPU not in ALLOWED_GPUS:
     raise ValueError(f"Unsupported GPU type: {GPU}")
 if not 1 <= TIMEOUT_MINUTES <= 345:
     raise ValueError("GPU_MANAGER_TIMEOUT must be between 1 and 345 minutes")
+if not re.fullmatch(r"[0-9]+-[0-9]+-[0-9]+", TRANSFER_KEY):
+    raise ValueError("GPU_MANAGER_TRANSFER_KEY must contain repository-run-attempt IDs")
 
-TRANSFER_VOLUME = modal.Volume.from_name("gpu-manager-transfer", create_if_missing=True)
+TRANSFER_VOLUME_NAME = f"gpu-manager-{TRANSFER_KEY}"
+TRANSFER_VOLUME = modal.Volume.from_name(TRANSFER_VOLUME_NAME, create_if_missing=True)
 app = modal.App("gpu-manager-one-shot")
 
 image = (
@@ -52,16 +56,17 @@ image = (
 
 
 def validate_transfer_key(value: str) -> str:
-    if not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", value):
-        raise ValueError("transfer_key contains unsupported characters")
+    if not re.fullmatch(r"[0-9]+-[0-9]+-[0-9]+", value):
+        raise ValueError("transfer_key must contain repository-run-attempt IDs")
+    if value != TRANSFER_KEY:
+        raise ValueError("transfer_key does not match the isolated Volume selected for this run")
     return value
 
 
-def prepare_transfer_directory(transfer_key: str) -> Path:
-    """Copy input files to a unique Volume path and link the project folder to it."""
-    key = validate_transfer_key(transfer_key)
+def prepare_transfer_directory() -> Path:
+    """Copy input files into this run's Volume and link the project folder to it."""
     source_dir = Path("/workspace/.gpu-manager-transfer")
-    volume_dir = Path("/transfer") / key
+    volume_dir = Path("/transfer")
     volume_dir.mkdir(parents=True, exist_ok=True)
 
     if source_dir.is_symlink():
@@ -92,7 +97,7 @@ def start_periodic_volume_commits() -> tuple[threading.Event, threading.Thread]:
             try:
                 TRANSFER_VOLUME.commit()
                 print("Periodic Modal Volume checkpoint commit completed.")
-            except Exception as exc:  # Keep the workload alive; final commit retries.
+            except Exception as exc:
                 print(f"Warning: periodic Volume commit failed: {exc}")
 
     thread = threading.Thread(target=commit_loop, name="modal-volume-commit", daemon=True)
@@ -109,16 +114,17 @@ def start_periodic_volume_commits() -> tuple[threading.Event, threading.Thread]:
     volumes={"/transfer": TRANSFER_VOLUME},
 )
 def execute(command: str, setup_command: str, transfer_key: str) -> int:
-    """Execute trusted project code with live checkpoint persistence to Modal Volume."""
+    """Execute trusted project code with live checkpoint persistence to a per-run Volume."""
     key = validate_transfer_key(transfer_key)
     workdir = Path("/workspace")
     if not workdir.is_dir():
         raise RuntimeError("Caller workspace was not copied into the Modal image")
 
-    transfer_path = prepare_transfer_directory(key)
+    transfer_path = prepare_transfer_directory()
     print(f"GPU: {GPU}")
     print(f"Working directory: {workdir}")
     print(f"Persistent transfer directory: {transfer_path}")
+    print(f"Isolated Modal Volume: {TRANSFER_VOLUME_NAME}")
     print("Starting remote workload...")
 
     stop_event, commit_thread = start_periodic_volume_commits()
@@ -144,7 +150,6 @@ def execute(command: str, setup_command: str, transfer_key: str) -> int:
     finally:
         stop_event.set()
         commit_thread.join()
-        # Ensure the last checkpoint/output changes are visible to the runner.
         TRANSFER_VOLUME.commit()
 
     if return_code != 0:
